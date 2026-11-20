@@ -33,12 +33,21 @@ const guest=await http('/api/games/'+g.pin+'/join','POST',{name:'Test Player',pr
 assert.equal((await http('/api/games/'+g.pin+'/join','POST',{name:'Same PRO',pro:'PRO001'})).status,409);
 assert.equal((await http('/api/me','GET',undefined,token)).data.question.number,1);
 const answers=['Gucci','Tata','Amul','Apple','Coffee','Netflix','Chocolates'];
-for(let i=0;i<7;i++){const result=await http('/api/me/answer','POST',{answer:answers[i]},token);assert.equal(result.status,200,'answer '+i+': '+JSON.stringify(result));assert.equal(result.data.points,10);const state=(await http('/api/me','GET',undefined,token)).data;assert.equal(state.answered,i+1)}
+assert.equal((await http('/api/me/answer','POST',{answer:'Gucci'},token)).status,409,'Cannot answer before timer starts');
+for(let i=0;i<7;i++){
+ const started=await http('/api/me/start','POST',{},token);
+ assert.equal(started.status,200);
+ assert.equal(started.data.questionIndex,i);
+ assert.equal(started.data.seconds,30);
+ const same=await http('/api/me/start','POST',{},token);
+ assert.equal(same.data.deadline,started.data.deadline,'Question timer must not reset');
+ const result=await http('/api/me/answer','POST',{answer:answers[i]},token);assert.equal(result.status,200,'answer '+i+': '+JSON.stringify(result));assert.equal(result.data.points,10);const state=(await http('/api/me','GET',undefined,token)).data;assert.equal(state.answered,i+1)}
 const final=(await http('/api/me','GET',undefined,token)).data;assert.equal(final.completed,true);assert.equal(final.total,70);
 assert.equal((await http('/api/me/answer','POST',{answer:'extra'},token)).status,400);
 let view=(await http('/api/host/games/'+g.pin,'GET',undefined,host)).data;assert.equal(view.players[0].pro,'PRO001');assert.equal(view.players[0].total,70);assert.equal(view.answers.length,7);
 const file=await fetch(base+'/api/host/games/'+g.pin+'/export/scores',{headers:{Authorization:'Bearer '+host}});assert.equal(file.status,200);assert.ok((await file.text()).includes('PRO001'));
 const other=(await http('/api/games/'+g.pin+'/join','POST',{name:'Unusual',pro:'PRO002'})).data.token;
+await http('/api/me/start','POST',{},other);
 const unknown=await http('/api/me/answer','POST',{answer:'Unusual luxury brand'},other);assert.equal(unknown.data.status,'pending');
 view=(await http('/api/host/games/'+g.pin,'GET',undefined,host)).data;
 const pending=view.answers.find(x=>x.status==='pending');assert.ok(pending);
