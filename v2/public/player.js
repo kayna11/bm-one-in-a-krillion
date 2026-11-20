@@ -9,9 +9,44 @@ let v;try{v=await res.json()}catch{throw Error('Server returned an invalid respo
 function el(tag,className,text){const e=document.createElement(tag);if(className)e.className=className;if(text!==undefined)e.textContent=text;return e}
 function list(container,items){container.replaceChildren();items.forEach(({name,score})=>{const r=el('div','log');r.append(el('span','',name),el('b','',score));container.append(r)})}
 async function refresh(){if(!token)return;state=await api('/api/me');$('registration').classList.add('hidden');$('playing').classList.remove('hidden');render()}
-function render(){if(!state)return;$('depth').textContent='▼ '+String(state.total*10).padStart(4,'0')+' M';$('progress').textContent=state.completed?'7 / 7 COMPLETE':'QUESTION '+state.question.number+' / 7';$('total').textContent=state.total+' POINTS';$('resultsPanel').classList.toggle('hidden',!state.completed);if(state.completed){$('questionPanel').classList.add('hidden');$('revealPanel').classList.add('hidden');$('finalPoints').textContent=state.total+' / 700 POINTS';$('pendingNote').textContent=state.pending?state.pending+' answer(s) are under review. Your final score can still change.':'All answers scored.';list($('roundScores'),state.rounds.map(x=>({name:'Q'+x.number+' · '+(x.answer||'—'),score:x.points===null?'REVIEW':x.points})));list($('leaderboard'),state.leaderboard.map(x=>({name:x.rank+'. '+x.name,score:x.total})));return}
-if(reveal){$('questionPanel').classList.add('hidden');$('revealPanel').classList.remove('hidden');$('revealTier').textContent=reveal.tier||'ANSWER UNDER REVIEW';$('revealAnswer').textContent=reveal.answer;$('revealPoints').textContent=reveal.points===null?'PENDING':reveal.points+' POINTS';$('revealNote').textContent=reveal.points===null?'Your answer is saved. You may continue; the organiser will review its score.':'Rare answers take you deeper!';return}
-$('questionPanel').classList.remove('hidden');$('revealPanel').classList.add('hidden');$('questionNumber').textContent='◈ QUESTION '+String(state.question.number).padStart(2,'0')+' OF 07 ◈';$('question').textContent=state.question.text}
+function render(){
+  if(!state)return;
+  $('depth').textContent='▼ '+String(state.total*10).padStart(4,'0')+' M';
+  $('progress').textContent=state.completed?'7 / 7 COMPLETE':'QUESTION '+state.question.number+' / 7';
+  $('total').textContent=state.total+' POINTS';
+  // Keep the most recent score visible even after question seven.
+  // The final scoreboard appears only when the contestant presses Continue.
+  $('resultsPanel').classList.toggle('hidden',!state.completed||!!reveal);
+  if(reveal){
+    $('questionPanel').classList.add('hidden');
+    $('revealPanel').classList.remove('hidden');
+    $('revealRound').textContent='◈ QUESTION '+String(state.answered).padStart(2,'0')+' SCORE ◈';
+    $('revealAnswer').textContent=reveal.answer;
+    const pending=reveal.points===null;
+    const points=pending?null:Number(reveal.points);
+    $('revealPoints').textContent=pending?'PENDING':points+' POINTS';
+    $('revealTier').textContent=pending?'AWAITING ORGANISER REVIEW':points===0?'INVALID / NO POINTS':reveal.tier||'ANSWER ACCEPTED';
+    $('revealNote').textContent=pending
+      ?'Your answer is saved. The organiser will assign its rarity score. You can continue playing.'
+      :'You earned '+points+' points on this answer.';
+    $('revealTotal').textContent=state.total+' POINTS'+(state.pending?' (PROVISIONAL)':'');
+    $('nextButton').textContent=state.completed?'▼ SEE FINAL RESULTS ▼':'▼ NEXT QUESTION ▼';
+    $('revealPanel').classList.toggle('score-pending',pending);
+    return;
+  }
+  $('revealPanel').classList.add('hidden');
+  if(state.completed){
+    $('questionPanel').classList.add('hidden');
+    $('finalPoints').textContent=state.total+' / 700 POINTS';
+    $('pendingNote').textContent=state.pending?state.pending+' answer(s) are under review. Your final score can still change.':'All answers scored.';
+    list($('roundScores'),state.rounds.map(x=>({name:'Q'+x.number+' · '+(x.answer||'—'),score:x.points===null?'REVIEW':x.points+' PTS'})));
+    list($('leaderboard'),state.leaderboard.map(x=>({name:x.rank+'. '+x.name,score:x.total+' PTS'})));
+    return;
+  }
+  $('questionPanel').classList.remove('hidden');
+  $('questionNumber').textContent='◈ QUESTION '+String(state.question.number).padStart(2,'0')+' OF 07 ◈';
+  $('question').textContent=state.question.text;
+}
 
 /* Visual transition only. Actual points and game progress remain server-authoritative. */
 function playDescent(previousPoints,nextPoints,awardedPoints){
