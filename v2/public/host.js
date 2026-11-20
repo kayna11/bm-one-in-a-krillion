@@ -1,7 +1,7 @@
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
-  const state = {pin:'', games:[], game:null, busy:false, query:''};
+  const state = {pin:'', games:[], game:null, bank:null, bankIndex:0, busy:false, query:''};
   const banner = $('error');
 
   function message(value) {
@@ -60,7 +60,8 @@
     $('gameArea').classList.remove('hidden');
     $('gameLabel').textContent='Game '+g.pin;
     $('hostUpdated').textContent='Updated '+new Date().toLocaleTimeString()+' · Live scoreboard';
-    $('gameStatus').textContent=g.status==='open'?'Open — contestants can play independently':'Closed — results are saved';
+    $('gameStatus').textContent=g.status==='draft'?'DRAFT — review all seven answer banks to activate this PIN':g.status==='open'?'OPEN — contestants can play independently':'CLOSED — results are saved';
+    $('bankSetup').classList.toggle('hidden',g.status!=='draft');
     $('currentPin').textContent=g.pin;
     $('playerLink').href=location.origin+'/?pin='+g.pin;
     $('closeGame').disabled=g.status!=='open';
@@ -107,6 +108,42 @@
     tbody.replaceChildren();
     for(const a of g.answers)tbody.append(tableRow([a.player,a.pro,'Q'+(a.questionIndex+1),a.answer,a.status,a.points]));
   }
+  function bankLines(rows){
+    return rows.map(r=>[r[0],r[1],(r[2]||[]).join(', ')].join(' | ').replace(/\\s*\\|\\s*$/,'')).join('\\n');
+  }
+  function parseBankLines(value){
+    const lines=value.split(/\\r?\\n/).map(x=>x.trim()).filter(Boolean);
+    return lines.map((line,i)=>{
+      const parts=line.split('|').map(x=>x.trim());
+      if(parts.length<2||parts.length>3)throw Error('Row '+(i+1)+': use Answer | points | aliases');
+      if(![10,15,30,60,85,100].includes(Number(parts[1])))throw Error('Row '+(i+1)+': points must be 10, 15, 30, 60, 85, or 100');
+      return [parts[0],Number(parts[1]),parts[2]?parts[2].split(',').map(a=>a.trim()).filter(Boolean):[]];
+    });
+  }
+  function renderBankEditor(){
+    const bank=state.bank;if(!bank)return;
+    const select=$('bankQuestion'),index=state.bankIndex;
+    select.replaceChildren();
+    bank.questions.forEach((q,i)=>{
+      const checked=bank.reviewedQuestions.includes(i);
+      const option=node('option',(checked?'✓ ':'○ ')+'Q'+(i+1)+' — '+q.question);
+      option.value=String(i);select.append(option);
+    });
+    select.value=String(index);
+    $('bankQuestionText').textContent=bank.questions[index].question;
+    $('bankRows').value=bankLines(bank.questions[index].answers);
+    $('bankCheckList').textContent='QUESTIONS CHECKED: '+bank.reviewedQuestions.map(i=>'Q'+(i+1)).join(' · ');
+    $('bankProgress').textContent=bank.reviewedQuestions.length+' / 7 REVIEWED';
+    $('publishBank').disabled=bank.reviewedQuestions.length!==7;
+    $('bankStatus').textContent=bank.reviewedQuestions.includes(index)?'✓ Question '+(index+1)+' saved and reviewed.':'Question '+(index+1)+' needs review.';
+  }
+  async function loadBank(){
+    if(!state.pin||state.game?.status!=='draft'){state.bank=null;$('bankSetup').classList.add('hidden');return;}
+    state.bank=await request('/api/host/games/'+state.pin+'/bank');
+    $('bankSetup').classList.remove('hidden');
+    renderBankEditor();
+  }
+
   async function load() {
     state.games=await request('/api/host/games');
     $('loginPanel').classList.add('hidden');
@@ -125,6 +162,7 @@
     if(!state.games.some(g=>g.pin===state.pin))state.pin=state.games[0].pin;
     select.value=state.pin;
     await refresh();
+    await loadBank();
   }
   function download(kind) {
     if(!state.pin)return;
@@ -147,12 +185,36 @@
   }));
   $('gameSelect').addEventListener('change',()=>perform(async()=>{
     state.pin=$('gameSelect').value;
-    await refresh();
+    state.bankIndex=0;state.bank=null;
+    await refresh();await loadBank();
   }));
   $('search').addEventListener('input',()=>{
     state.query=$('search').value.trim().toLowerCase();
     scoreboard();
   });
+  $('bankQuestion').addEventListener('change',()=>{
+    if(!state.bank)return;
+    const next=Number($('bankQuestion').value);
+    if(next!==state.bankIndex&&$('bankRows').value!==bankLines(state.bank.questions[state.bankIndex].answers)&&!confirm('You have unsaved changes. Switch questions anyway?')){
+      $('bankQuestion').value=String(state.bankIndex);return;
+    }
+    state.bankIndex=next;
+    renderBankEditor();
+  });
+  $('saveBank').addEventListener('click',()=>perform(async()=>{
+    if(!state.bank||state.game?.status!=='draft')throw Error('Only draft games can be edited');
+    const rows=parseBankLines($('bankRows').value);
+    await request('/api/host/games/'+state.pin+'/bank',{questionIndex:state.bankIndex,rows});
+    await loadBank();
+    $('bankStatus').textContent='✓ Question '+(state.bankIndex+1)+' approved and saved.';
+  }));
+  $('publishBank').addEventListener('click',()=>perform(async()=>{
+    if(!state.bank||state.bank.reviewedQuestions.length!==7)throw Error('Review all seven answer lists first');
+    if(!confirm('Open game '+state.pin+'? The approved scores will be locked. Players can then join.'))return;
+    await request('/api/host/games/'+state.pin+'/publish',{confirm:'I reviewed and approved the full answer bank'});
+    state.bank=null;
+    await load();
+  }));
   $('copyPin').addEventListener('click',()=>perform(async()=>{
     try{await navigator.clipboard.writeText(state.pin);$('copyPin').textContent='PIN COPIED ✓';setTimeout(()=>{$('copyPin').textContent='COPY PIN';},1500);}
     catch{message('Game PIN: '+state.pin);}
