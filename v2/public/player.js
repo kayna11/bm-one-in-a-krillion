@@ -77,7 +77,9 @@ function render(){
     $('revealPoints').textContent=pending?'PENDING':points+' POINTS';
     $('revealTier').textContent=pending?'AWAITING ORGANISER REVIEW':points===0?'INVALID / NO POINTS':reveal.tier||'ANSWER ACCEPTED';
     $('revealNote').textContent=pending
-      ?'Your answer is saved. The organiser will assign its rarity score. You can continue playing.'
+      ?'This answer is awaiting review in an older game.'
+      :reveal.status==='unlisted'?'This answer was not in the organiser-approved answer bank. It scores 0 under the published rules.'
+      :reveal.status==='timed_out'?'Time ran out. This question scores 0.'
       :'You earned '+points+' points on this answer.';
     $('revealTotal').textContent=state.total+' POINTS'+(state.pending?' (PROVISIONAL)':'');
     $('nextButton').textContent=state.completed?'▼ SEE FINAL RESULTS ▼':'▼ NEXT QUESTION ▼';
