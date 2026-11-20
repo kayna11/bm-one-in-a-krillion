@@ -36,8 +36,15 @@ function cleanBankRows(rows){
    const name=String(entry[0]||'').trim().slice(0,120),points=Number(entry[1]);
    const aliases=Array.isArray(entry[2])?entry[2].map(v=>String(v||'').trim().slice(0,120)).filter(Boolean):[];
    if(!name||!ALLOWED_POINTS.has(points)||aliases.length>12)throw Error('Invalid answer or points at row '+(i+1));
-   for(const term of [name,...aliases]){const key=norm(term);if(!key||used.has(key))throw Error('Duplicate or empty answer/alias: '+term);used.add(key)}
-   return [name,points,aliases];
+   const local=new Set(),uniqueAliases=[];
+   for(const term of [name,...aliases]){
+     const key=norm(term);if(!key)throw Error('Empty answer or alias');
+     if(local.has(key))continue; // Spelling variants with identical normalization are harmless.
+     if(used.has(key))throw Error('Answer appears under two different score tiers: '+term);
+     local.add(key);used.add(key);
+     if(term!==name)uniqueAliases.push(term);
+   }
+   return [name,points,uniqueAliases];
  });
 }
 
