@@ -41,10 +41,13 @@
     const body=$('players');
     body.replaceChildren();
     if(!state.game)return;
+    let visible=0;
     for(const p of state.game.players) {
       if(!(p.name+' '+p.pro).toLowerCase().includes(state.query)) continue;
+      visible++;
       body.append(tableRow([p.rank,p.name,p.pro,...p.scores,p.total,p.answered+'/7'+(p.pending?' · '+p.pending+' pending':'')]));
     }
+    if(visible===0) body.append(tableRow(['—',state.query?'No matching participants':'Waiting for players to join…','—',...Array(7).fill('—'),'—','—']));
   }
   async function refresh() {
     if(!state.pin)return;
@@ -56,6 +59,7 @@
     if(!g)return;
     $('gameArea').classList.remove('hidden');
     $('gameLabel').textContent='Game '+g.pin;
+    $('hostUpdated').textContent='Updated '+new Date().toLocaleTimeString()+' · Live scoreboard';
     $('gameStatus').textContent=g.status==='open'?'Open — contestants can play independently':'Closed — results are saved';
     $('currentPin').textContent=g.pin;
     $('playerLink').href=location.origin+'/?pin='+g.pin;
@@ -149,6 +153,11 @@
     state.query=$('search').value.trim().toLowerCase();
     scoreboard();
   });
+  $('copyPin').addEventListener('click',()=>perform(async()=>{
+    try{await navigator.clipboard.writeText(state.pin);$('copyPin').textContent='PIN COPIED ✓';setTimeout(()=>{$('copyPin').textContent='COPY PIN';},1500);}
+    catch{message('Game PIN: '+state.pin);}
+  }));
+  $('refreshScores').addEventListener('click',()=>perform(refresh));
   $('copyLink').addEventListener('click',()=>perform(async()=>{
     await navigator.clipboard.writeText(location.origin+'/?pin='+state.pin);
     $('copyLink').textContent='COPIED ✓';
