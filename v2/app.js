@@ -19,7 +19,7 @@ const norm=s=>String(s??'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toL
 const id=()=>crypto.randomUUID();
 function sign(payload){const content=Buffer.from(JSON.stringify(payload)).toString('base64url');const sig=crypto.createHmac('sha256',SECRET).update(content).digest('base64url');return content+'.'+sig}
 function verify(token){try{const [content,sig]=String(token||'').split('.');if(!content||!sig)return null;const actual=crypto.createHmac('sha256',SECRET).update(content).digest();const provided=Buffer.from(sig,'base64url');if(actual.length!==provided.length||!crypto.timingSafeEqual(actual,provided))return null;return JSON.parse(Buffer.from(content,'base64url').toString())}catch{return null}}
-function bearer(req){return verify((req.headers.authorization||'').replace(/^Bearer /i,''))}
+function bearer(req){const authorization=(req.headers.authorization||'').replace(/^Bearer /i,'');const fromCookie=(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('krillion_host='));return verify(authorization||fromCookie?.slice('krillion_host='.length))}
 function authHost(req){const t=bearer(req);return t?.role==='host'&&Date.now()<t.expires}
 function authPlayer(req){const t=bearer(req);return t?.role==='player'?db.players.find(p=>p.id===t.id&&p.tokenNonce===t.nonce):null}
 function response(res,status,payload){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(payload))}
@@ -34,10 +34,20 @@ function scoreAnswer(questionIndex,text){const n=norm(text);if(!n)return null;co
 function csv(s){const v=String(s??'');return '"'+(/^[=+\-@\t\r]/.test(v)?"'":'')+v.replaceAll('"','""')+'"'}
 const MIME={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8'};
 function staticFile(res,urlPath){const route=urlPath==='/'?'index.html':urlPath==='/host'?'host.html':urlPath.slice(1);const filename=path.resolve(ROOT,'public',route);if(!filename.startsWith(path.resolve(ROOT,'public')+path.sep))return err(res,403,'Forbidden');try{const content=fs.readFileSync(filename);res.writeHead(200,{'Content-Type':MIME[path.extname(filename)]||'application/octet-stream','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(content)}catch{return err(res,404,'Not found')}}
+function goodPassword(value){const expected=crypto.createHash('sha256').update(PASSWORD).digest();const given=crypto.createHash('sha256').update(String(value||'')).digest();return crypto.timingSafeEqual(expected,given)}
+async function readForm(req){let body='';for await (const chunk of req){body+=chunk;if(body.length>4096)throw Error('Form too large')}return Object.fromEntries(new URLSearchParams(body))}
+function redirect(res,where,cookie){res.writeHead(303,{'Location':where,'Cache-Control':'no-store',...(cookie?{'Set-Cookie':cookie}:{})});res.end()}
 const server=http.createServer(async(req,res)=>{const pathname=new URL(req.url,'http://localhost').pathname;
 try{
+if(req.method==='POST'&&pathname==='/host/login'){
+ const data=await readForm(req);
+ if(!goodPassword(data.password))return redirect(res,'/host?error=incorrect');
+ const signed=sign({role:'host',expires:Date.now()+7*86400000});
+ return redirect(res,'/host?login=success','krillion_host='+signed+'; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=604800');
+}
+if(req.method==='GET'&&pathname==='/api/host/session')return response(res,200,{authenticated:!!authHost(req)});
 if(req.method==='GET'&&pathname==='/api/health')return response(res,200,{ok:true,version:2,mode:'self-paced'});
-if(req.method==='POST'&&pathname==='/api/host/login'){const body=await parseBody(req);const expected=crypto.createHash('sha256').update(PASSWORD).digest();const given=crypto.createHash('sha256').update(String(body.password||'')).digest();if(!crypto.timingSafeEqual(expected,given))return err(res,401,'Incorrect organiser password');return response(res,200,{token:sign({role:'host',expires:Date.now()+7*86400000})})}
+if(req.method==='POST'&&pathname==='/api/host/login'){const body=await parseBody(req);if(!goodPassword(body.password))return err(res,401,'Incorrect organiser password');return response(res,200,{token:sign({role:'host',expires:Date.now()+7*86400000})})}
 if(pathname.startsWith('/api/host/')&&!authHost(req))return err(res,401,'Organiser login required');
 if(req.method==='GET'&&pathname==='/api/host/games')return response(res,200,db.games.map(g=>({pin:g.pin,id:g.id,status:g.status,createdAt:g.createdAt})).reverse());
 if(req.method==='POST'&&pathname==='/api/host/games'){let pin;do{pin=String(crypto.randomInt(100000,1000000))}while(gameByPin(pin));const game={id:id(),pin,status:'open',createdAt:new Date().toISOString()};db.games.push(game);save();return response(res,201,{pin,id:game.id})}
@@ -52,6 +62,10 @@ if(req.method==='GET'&&m){const game=gameByPin(m[1]);if(!game)return err(res,404
 m=pathname.match(/^\/api\/games\/(\d{6})\/join$/);
 if(req.method==='POST'&&m){const game=gameByPin(m[1]);if(!game||game.status!=='open')return err(res,400,'Invalid or closed game PIN');const b=await parseBody(req),name=String(b.name||'').trim().slice(0,80),pro=String(b.pro||'').trim().slice(0,60);if(!name||!pro)return err(res,400,'Enter name and PRO number');if(db.players.some(p=>p.gameId===game.id&&norm(p.pro)===norm(pro)))return err(res,409,'PRO number already registered for this PIN');const player={id:id(),gameId:game.id,name,pro,tokenNonce:id()};db.players.push(player);save();return response(res,201,{token:sign({role:'player',id:player.id,nonce:player.tokenNonce}),pin:game.pin})}
 if(pathname.startsWith('/api/me')){const p=authPlayer(req);if(!p)return err(res,401,'Player session expired. Use your original browser or join a new PIN');if(req.method==='GET'&&pathname==='/api/me')return response(res,200,playerState(p));if(req.method==='POST'&&pathname==='/api/me/answer'){const game=db.games.find(g=>g.id===p.gameId);if(game.status!=='open')return err(res,400,'This game is closed');const next=playerAnswers(p.id).length;if(next>=7)return err(res,400,'All seven questions are already completed');const b=await parseBody(req),answer=String(b.answer||'').trim().slice(0,150);if(!answer)return err(res,400,'Type an answer');const scoring=scoreAnswer(next,answer),entry={id:id(),playerId:p.id,questionIndex:next,answer,status:scoring?'accepted':'pending',points:scoring?.points??null,tier:scoring?.tier??null,canonical:scoring?.canonical??null};db.answers.push(entry);save();return response(res,200,{points:entry.points,tier:entry.tier,status:entry.status,answer,total:sum(p.id),next:next+1})}}
+if(req.method==='GET'&&pathname==='/host'){
+ const bad=new URL(req.url,'http://localhost').searchParams.get('error')==='incorrect';
+ if(bad){const file=fs.readFileSync(path.join(ROOT,'public','host.html'),'utf8');res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'});return res.end(file.replace('</form>','</form><p style="color:#b71c46;font-weight:bold" role="alert">Incorrect password. Try again.</p>'))}
+}
 if(req.method==='GET'&&!pathname.startsWith('/api/'))return staticFile(res,pathname);
 return err(res,404,'Not found');
 }catch(e){console.error('Request failed:',e);return err(res,500,'Server error. Please try again.')}});
