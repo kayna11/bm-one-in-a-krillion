@@ -12,7 +12,7 @@ async function server(n,db,questionSeconds=30){const proc=spawn(process.execPath
 test('7 questions, immediate scores, organiser review, CSV, and storage restart', {timeout:40000},async()=>{
 const dir=fs.mkdtempSync(path.join(os.tmpdir(),'krillion-v2-'));const db=path.join(dir,'data.json');const n=await port();let proc=await server(n,db);const base='http://127.0.0.1:'+n;const http=async(route,method='GET',body,token)=>{const res=await fetch(base+route,{method,headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},body:body===undefined?undefined:JSON.stringify(body)});return {status:res.status,data:await res.json().catch(()=>null)}};
 try{
-assert.equal((await http('/api/health')).data.version,2);
+assert.equal((await http('/api/health')).data.version,3);
 const playerPage=await fetch(base+'/');assert.equal(playerPage.status,200);assert.ok((await playerPage.text()).includes('BEGIN DESCENDING'));
 assert.equal((await http('/host')).status,200);assert.equal((await http('/api/host/games')).status,401);
 assert.equal((await http('/api/host/login','POST',{password:'bad'})).status,401);
@@ -29,6 +29,21 @@ assert.equal(cookieGames.status,200);
 
 const host=(await http('/api/host/login','POST',{password:'my-very-strong-host-password'})).data.token;assert.ok(host);
 const g=(await http('/api/host/games','POST',{},host)).data;assert.match(g.pin,/^\d{6}$/);
+assert.equal(g.status,'draft');
+assert.equal((await http('/api/games/'+g.pin+'/join','POST',{name:'Too Early',pro:'EARLY'})).status,400);
+let bank=(await http('/api/host/games/'+g.pin+'/bank','GET',undefined,host)).data;
+assert.equal(bank.questions.length,7);
+assert.equal(bank.reviewedQuestions.length,0);
+assert.equal((await http('/api/host/games/'+g.pin+'/publish','POST',{confirm:'I reviewed and approved the full answer bank'},host)).status,409);
+for(let i=0;i<7;i++){
+ const saved=await http('/api/host/games/'+g.pin+'/bank','POST',{questionIndex:i,rows:bank.questions[i].answers},host);
+ assert.equal(saved.status,200,'Bank review '+i);
+}
+bank=(await http('/api/host/games/'+g.pin+'/bank','GET',undefined,host)).data;
+assert.equal(bank.reviewedQuestions.length,7);
+assert.equal((await http('/api/host/games/'+g.pin+'/publish','POST',{confirm:'I reviewed and approved the full answer bank'},host)).status,200);
+assert.equal((await http('/api/host/games/'+g.pin+'/bank','POST',{questionIndex:0,rows:bank.questions[0].answers},host)).status,409,'Published bank must be immutable');
+
 const guest=await http('/api/games/'+g.pin+'/join','POST',{name:'Test Player',pro:'PRO001'});assert.equal(guest.status,201);const token=guest.data.token;
 assert.equal((await http('/api/games/'+g.pin+'/join','POST',{name:'Same PRO',pro:'PRO001'})).status,409);
 assert.equal((await http('/api/me','GET',undefined,token)).data.question.number,1);
@@ -48,11 +63,10 @@ let view=(await http('/api/host/games/'+g.pin,'GET',undefined,host)).data;assert
 const file=await fetch(base+'/api/host/games/'+g.pin+'/export/scores',{headers:{Authorization:'Bearer '+host}});assert.equal(file.status,200);assert.ok((await file.text()).includes('PRO001'));
 const other=(await http('/api/games/'+g.pin+'/join','POST',{name:'Unusual',pro:'PRO002'})).data.token;
 await http('/api/me/start','POST',{},other);
-const unknown=await http('/api/me/answer','POST',{answer:'Unusual luxury brand'},other);assert.equal(unknown.data.status,'pending');
+const unknown=await http('/api/me/answer','POST',{answer:'Unusual luxury brand'},other);assert.equal(unknown.data.status,'unlisted');assert.equal(unknown.data.points,0);assert.equal(unknown.data.tier,'NOT ON THE BOARD');
 view=(await http('/api/host/games/'+g.pin,'GET',undefined,host)).data;
-const pending=view.answers.find(x=>x.status==='pending');assert.ok(pending);
-assert.equal((await http('/api/host/games/'+g.pin+'/review','POST',{answerId:pending.id,points:85},host)).status,200);
-assert.equal((await http('/api/me','GET',undefined,other)).data.total,85);
+assert.equal(view.answers.find(x=>x.status==='unlisted').points,0);
+assert.equal((await http('/api/me','GET',undefined,other)).data.total,0);
 proc.kill();await once(proc,'exit');proc=await server(n,db);
 assert.equal((await http('/api/me','GET',undefined,token)).data.total,70);
 assert.equal((await http('/api/host/games/'+g.pin,'GET',undefined,host)).data.players.length,2);
@@ -72,6 +86,9 @@ test('Time limit is enforced by server, survives a page reload, and scores a tim
  try {
   const host=(await call('/api/host/login','POST',{password:'my-very-strong-host-password'})).value.token;
   const game=(await call('/api/host/games','POST',{},host)).value;
+  const bank=(await call('/api/host/games/'+game.pin+'/bank','GET',undefined,host)).value;
+  for(let i=0;i<7;i++)assert.equal((await call('/api/host/games/'+game.pin+'/bank','POST',{questionIndex:i,rows:bank.questions[i].answers},host)).status,200);
+  assert.equal((await call('/api/host/games/'+game.pin+'/publish','POST',{confirm:'I reviewed and approved the full answer bank'},host)).status,200);
   const player=(await call('/api/games/'+game.pin+'/join','POST',{name:'Timer Tester',pro:'TIME01'})).value.token;
   const first=await call('/api/me/start','POST',{},player);
   assert.equal(first.value.seconds,1);
