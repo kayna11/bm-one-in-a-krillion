@@ -109,10 +109,10 @@
     for(const a of g.answers)tbody.append(tableRow([a.player,a.pro,'Q'+(a.questionIndex+1),a.answer,a.status,a.points]));
   }
   function bankLines(rows){
-    return rows.map(r=>[r[0],r[1],(r[2]||[]).join(', ')].join(' | ').replace(/\\s*\\|\\s*$/,'')).join('\\n');
+    return rows.map(r=>r[0]+' | '+r[1]+((r[2]||[]).length?' | '+r[2].join(', '):'')).join('\n');
   }
   function parseBankLines(value){
-    const lines=value.split(/\\r?\\n/).map(x=>x.trim()).filter(Boolean);
+    const lines=value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
     return lines.map((line,i)=>{
       const parts=line.split('|').map(x=>x.trim());
       if(parts.length<2||parts.length>3)throw Error('Row '+(i+1)+': use Answer | points | aliases');
