@@ -67,6 +67,11 @@ const unknown=await http('/api/me/answer','POST',{answer:'Unusual luxury brand'}
 view=(await http('/api/host/games/'+g.pin,'GET',undefined,host)).data;
 assert.equal(view.answers.find(x=>x.status==='unlisted').points,0);
 assert.equal((await http('/api/me','GET',undefined,other)).data.total,0);
+await http('/api/me/start','POST',{},other);
+const aliasScore=await http('/api/me/answer','POST',{answer:'Indie Wild'},other);
+assert.equal(aliasScore.status,200);
+assert.equal(aliasScore.data.points,85,'Preapproved variant must be awarded immediately');
+assert.equal(aliasScore.data.status,'accepted');
 proc.kill();await once(proc,'exit');proc=await server(n,db);
 assert.equal((await http('/api/me','GET',undefined,token)).data.total,70);
 assert.equal((await http('/api/host/games/'+g.pin,'GET',undefined,host)).data.players.length,2);
