@@ -65,17 +65,17 @@ if(req.method==='GET'&&pathname==='/api/health')return response(res,200,{ok:true
 if(req.method==='POST'&&pathname==='/api/host/login'){const body=await parseBody(req);if(!goodPassword(body.password))return err(res,401,'Incorrect organiser password');return response(res,200,{token:sign({role:'host',expires:Date.now()+7*86400000})})}
 if(pathname.startsWith('/api/host/')&&!authHost(req))return err(res,401,'Organiser login required');
 if(req.method==='GET'&&pathname==='/api/host/games')return response(res,200,db.games.map(g=>({pin:g.pin,id:g.id,status:g.status,createdAt:g.createdAt})).reverse());
-if(req.method==='POST'&&pathname==='/api/host/games'){let pin;do{pin=String(crypto.randomInt(100000,1000000))}while(gameByPin(pin));const game={id:id(),pin,status:'draft',createdAt:new Date().toISOString(),bank:structuredClone(QUESTIONS),bankApprovedAt:null};db.games.push(game);save();return response(res,201,{pin,id:game.id,status:game.status})}
+if(req.method==='POST'&&pathname==='/api/host/games'){let pin;do{pin=String(crypto.randomInt(100000,1000000))}while(gameByPin(pin));const game={id:id(),pin,status:'draft',createdAt:new Date().toISOString(),bank:structuredClone(QUESTIONS),bankApprovedAt:null,reviewedQuestions:[]};db.games.push(game);save();return response(res,201,{pin,id:game.id,status:game.status})}
 let bankMatch=pathname.match(/^\/api\/host\/games\/(\d{6})\/bank$/);
 if(bankMatch){
  const game=gameByPin(bankMatch[1]);if(!game)return err(res,404,'Game not found');
- if(req.method==='GET')return response(res,200,{pin:game.pin,status:game.status,approvedAt:game.bankApprovedAt||null,questions:gameQuestions(game),note:'Starter tier values have not been empirically calibrated. Organiser must review and approve every question before publishing.'});
+ if(req.method==='GET')return response(res,200,{pin:game.pin,status:game.status,approvedAt:game.bankApprovedAt||null,reviewedQuestions:game.reviewedQuestions||[],questions:gameQuestions(game),note:'Starter tier values have not been empirically calibrated. Organiser must review and approve every question before publishing.'});
  if(req.method==='POST'){
   if(game.status!=='draft')return err(res,409,'Bank is locked once the game is published');
   const b=await parseBody(req),index=Number(b.questionIndex);
   if(!Number.isInteger(index)||index<0||index>=7)return err(res,400,'Invalid question number');
   let cleaned;try{cleaned=cleanBankRows(b.rows)}catch(error){return err(res,400,error.message)}
-  game.bank[index].answers=cleaned;save();
+  game.bank[index].answers=cleaned;game.reviewedQuestions=[...new Set([...(game.reviewedQuestions||[]),index])].sort();save();
   return response(res,200,{ok:true,questionIndex:index,count:cleaned.length});
  }
 }
@@ -83,6 +83,7 @@ bankMatch=pathname.match(/^\/api\/host\/games\/(\d{6})\/publish$/);
 if(req.method==='POST'&&bankMatch){
  const game=gameByPin(bankMatch[1]);if(!game)return err(res,404,'Game not found');
  if(game.status!=='draft')return err(res,409,'Game already published or closed');
+ if((game.reviewedQuestions||[]).length!==7)return err(res,409,'Review and save all seven question banks before publishing');
  const b=await parseBody(req);
  if(b.confirm!=='I reviewed and approved the full answer bank')return err(res,400,'Confirm that all seven answer lists and tier scores have been checked');
  try{game.bank.forEach(q=>cleanBankRows(q.answers))}catch(error){return err(res,400,error.message)}
