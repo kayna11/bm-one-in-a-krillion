@@ -1,11 +1,155 @@
-const $=id=>document.getElementById(id);const tokenKey='krillion-player-token';let token=localStorage.getItem(tokenKey),pin=localStorage.getItem('krillion-game-pin'),progress=null,preview=null;const sock=io();
-function resetSession(message){token=null;pin=null;preview=null;progress=null;localStorage.removeItem(tokenKey);localStorage.removeItem('krillion-game-pin');$('game').classList.add('hidden');$('join').classList.remove('hidden');if(message)showError(message)}
-function showError(m){$('error').textContent=m;$('error').classList.remove('hidden');setTimeout(()=>$('error').classList.add('hidden'),6500)}
-async function api(url,body){const res=await fetch(url,{method:body?'POST':'GET',headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},body:body?JSON.stringify(body):undefined});const data=await res.json();if(!res.ok)throw Error(data.error||'Something went wrong');return data}
-function escapeHtml(s){return String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;')}
-async function refresh(){if(!token)return;try{progress=await api('/api/player/game');$('join').classList.add('hidden');$('game').classList.remove('hidden');render()}catch(e){resetSession('Your old session is no longer available. Please join a newly generated game PIN. '+e.message)}}
-function render(){if(!progress)return;$('counter').textContent=progress.completed?'7 / 7 COMPLETE':'QUESTION '+progress.question.number+' / 7';$('total').textContent='DEPTH '+(progress.total*10)+' M';$('depth').textContent='▼ '+String(progress.total*10).padStart(4,'0')+' M';$('complete').classList.toggle('hidden',!progress.completed);if(progress.completed){$('questionBox').classList.add('hidden');$('reveal').classList.add('hidden');$('finalScore').textContent=progress.total+' / 700 POINTS';$('pending').textContent=progress.pending?progress.pending+' answer(s) awaiting organiser review. Your final score may change.':'All seven answers scored.';$('history').innerHTML='<h3>YOUR DIVE LOG</h3>'+progress.rounds.map(x=>'<div class="log-row"><span>Q'+x.number+' · '+escapeHtml(x.answer||'—')+'</span><b>'+(x.points??'REVIEW')+'</b></div>').join('');$('leaderboard').innerHTML='<h3>COMPLETED PLAYERS</h3>'+progress.leaderboard.map(x=>'<div class="log-row"><span>'+x.rank+'. '+escapeHtml(x.name)+' <small>'+escapeHtml(x.college)+'</small></span><b>'+x.total+'</b></div>').join('');return}if(preview){$('questionBox').classList.add('hidden');$('reveal').classList.remove('hidden');$('revealAnswer').textContent=preview.answer;$('revealLabel').textContent=preview.status==='pending'?'ANSWER UNDER REVIEW':preview.tier||'INVALID ANSWER';$('revealScore').textContent=preview.points===null?'?':preview.points+' POINTS';$('revealMessage').textContent=preview.status==='pending'?'Your answer was saved. The organiser will decide its validity and rarity score. You can continue playing right away.':'You have descended '+(preview.points*10)+' metres!';return}$('questionBox').classList.remove('hidden');$('reveal').classList.add('hidden');$('promptLabel').textContent='◈ QUESTION '+String(progress.question.number).padStart(2,'0')+' OF 07 ◈';$('question').textContent=progress.question.text}
-$('joinBtn').onclick=async()=>{try{const p=await api('/api/join',{pin:$('pin').value.trim(),name:$('name').value.trim(),college:$('college').value.trim(),regId:$('reg').value.trim()});token=p.token;pin=p.pin;localStorage.setItem(tokenKey,token);localStorage.setItem('krillion-game-pin',pin);sock.emit('watch',pin);refresh()}catch(e){showError(e.message)}};
-$('answerForm').onsubmit=async e=>{e.preventDefault();const answer=$('answer').value.trim();if(!answer)return;const btn=$('answerForm').querySelector('button');btn.disabled=true;try{preview=await api('/api/player/answer',{answer});$('answer').value='';await refresh()}catch(e){showError(e.message)}finally{btn.disabled=false}};
-$('continue').onclick=()=>{preview=null;render()};
-sock.on('connect',()=>{if(pin)sock.emit('watch',pin)});sock.on('game:update',x=>{if(x.pin===pin&&token)refresh()});$('switchPlayer').onclick=()=>{resetSession();$('pin').value='';window.scrollTo({top:0,behavior:'smooth'})};const initial=new URLSearchParams(location.search).get('pin');if(initial)$('pin').value=initial;if(pin)sock.emit('watch',pin);if(token)refresh();
+(() => {
+'use strict';
+const $ = id => document.getElementById(id);
+const tokenKey = 'krillion-player-token';
+const pinKey = 'krillion-game-pin';
+let token = localStorage.getItem(tokenKey);
+let pin = localStorage.getItem(pinKey);
+let progress = null;
+let preview = null;
+let working = false;
+
+function error(message) {
+  const el = $('error');
+  el.textContent = String(message || 'Something went wrong.');
+  el.classList.remove('hidden');
+  el.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+function clearError() {$('error').classList.add('hidden');}
+function resetSession(message) {
+  token = null; pin = null; preview = null; progress = null;
+  localStorage.removeItem(tokenKey); localStorage.removeItem(pinKey);
+  $('game').classList.add('hidden');
+  $('join').classList.remove('hidden');
+  $('pin').value = new URLSearchParams(location.search).get('pin') || '';
+  if (message) error(message);
+}
+async function api(endpoint, payload) {
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      method: payload === undefined ? 'GET' : 'POST',
+      headers: {'Content-Type':'application/json', ...(token ? {Authorization:'Bearer '+token} : {})},
+      body: payload === undefined ? undefined : JSON.stringify(payload)
+    });
+  } catch {
+    throw new Error('Cannot reach the game server. Check your internet connection and try again.');
+  }
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Game server error (' + response.status + ')');
+  return data;
+}
+function esc(s) {
+  return String(s ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
+}
+function render() {
+  if (!progress) return;
+  const finished = progress.completed;
+  $('counter').textContent = finished ? '7 / 7 COMPLETE' : 'QUESTION ' + progress.question.number + ' / 7';
+  $('total').textContent = 'DEPTH ' + (progress.total * 10) + ' M';
+  $('depth').textContent = '▼ ' + String(progress.total * 10).padStart(4,'0') + ' M';
+  $('complete').classList.toggle('hidden', !finished);
+  if (finished) {
+    $('questionBox').classList.add('hidden');
+    $('reveal').classList.add('hidden');
+    $('finalScore').textContent = progress.total + ' / 700 POINTS';
+    $('pending').textContent = progress.pending
+      ? progress.pending + ' answer(s) awaiting organiser review. Final points may increase.'
+      : 'All seven answers scored.';
+    $('history').innerHTML = '<h3>YOUR DIVE LOG</h3>' + progress.rounds.map(x =>
+      '<div class="log-row"><span>Q' + x.number + ' · ' + esc(x.answer || '—') + '</span><b>' +
+      (x.points ?? 'REVIEW') + '</b></div>').join('');
+    $('leaderboard').innerHTML = '<h3>COMPLETED PLAYERS</h3>' +
+      progress.leaderboard.map(x =>
+        '<div class="log-row"><span>' + x.rank + '. ' + esc(x.name) +
+        '</span><b>' + x.total + '</b></div>').join('');
+    return;
+  }
+  if (preview) {
+    $('questionBox').classList.add('hidden');
+    $('reveal').classList.remove('hidden');
+    $('revealAnswer').textContent = preview.answer;
+    $('revealLabel').textContent = preview.status === 'pending' ? 'ANSWER UNDER REVIEW' : preview.tier;
+    $('revealScore').textContent = preview.points === null ? 'PENDING' : preview.points + ' POINTS';
+    $('revealMessage').textContent = preview.status === 'pending'
+      ? 'Your answer is saved. You can move on now; the organiser will review its rarity.'
+      : 'You descended ' + (preview.points * 10) + ' metres!';
+    return;
+  }
+  $('questionBox').classList.remove('hidden');
+  $('reveal').classList.add('hidden');
+  $('promptLabel').textContent = '◈ QUESTION ' + String(progress.question.number).padStart(2,'0') + ' OF 07 ◈';
+  $('question').textContent = progress.question.text;
+}
+async function refresh(showFailure = false) {
+  if (!token) return;
+  try {
+    progress = await api('/api/player/game');
+    $('join').classList.add('hidden');
+    $('game').classList.remove('hidden');
+    render();
+    clearError();
+  } catch (e) {
+    if (/401|session|expired|join the game|game not found/i.test(e.message)) {
+      resetSession('Previous player session unavailable. Enter the new game PIN and join again.');
+    } else if (showFailure) error(e.message);
+  }
+}
+
+$('join').addEventListener('submit', async event => {
+  event.preventDefault();
+  if (working) return;
+  clearError();
+  const name = $('name').value.trim();
+  const regId = $('reg').value.trim();
+  const submittedPin = $('pin').value.trim();
+  if (!/^[0-9]{6}$/.test(submittedPin)) return error('Enter the six-digit PIN generated by the organiser.');
+  if (!name) return error('Enter your name.');
+  if (!regId) return error('Enter your PRO number.');
+  working = true;
+  $('joinBtn').disabled = true;
+  $('joinBtn').textContent = 'CONNECTING…';
+  try {
+    // Old saved player credentials should never be sent when joining a new game.
+    token = null;
+    const player = await api('/api/join',{pin:submittedPin,name,regId});
+    token = player.token; pin = player.pin; preview = null;
+    localStorage.setItem(tokenKey, token);
+    localStorage.setItem(pinKey, pin);
+    await refresh(true);
+  } catch (e) {
+    error(e.message);
+  } finally {
+    working = false;
+    $('joinBtn').disabled = false;
+    $('joinBtn').textContent = '▼ BEGIN DESCENT ▼';
+  }
+});
+
+$('answerForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  if (working) return;
+  const answer = $('answer').value.trim();
+  if (!answer) return error('Type an answer first.');
+  working = true;
+  const button = $('answerForm').querySelector('button');
+  button.disabled = true;
+  try {
+    preview = await api('/api/player/answer',{answer});
+    $('answer').value = '';
+    await refresh(true);
+  } catch(e) {
+    error(e.message);
+  } finally {
+    working = false;
+    button.disabled = false;
+  }
+});
+$('continue').addEventListener('click', () => {preview = null; render(); clearError();});
+$('switchPlayer').addEventListener('click', () => {resetSession();window.scrollTo({top:0,behavior:'smooth'});});
+const queryPin = new URLSearchParams(location.search).get('pin');
+if (queryPin) $('pin').value = queryPin;
+if (token) refresh(true);
+// Poll only after a session exists, so an unavailable socket library cannot prevent interaction.
+setInterval(() => {if (token && !working && (progress?.completed || !preview)) refresh();},10000);
+})();
