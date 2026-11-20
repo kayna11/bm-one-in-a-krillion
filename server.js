@@ -135,7 +135,7 @@ app.get('/api/host/games',host,(_req,res)=>res.json(db.prepare('SELECT id,pin,st
 app.get('/api/host/game/:pin/export/:type',host,(req,res)=>{
  const g=gameByPin(req.params.pin);if(!g)return res.status(404).json({error:'Game not found'});
  const ps=selfResults(g),qs=questions(),ss=db.prepare('SELECT * FROM submissions WHERE game_id=?').all(g.id);
- const rows=req.params.type==='answers'?[['Name','College','Participant ID','Question','Answer','Canonical','Status','Score'],...ss.map(x=>{const p=ps.find(y=>y.id===x.player_id),q=qs.find(y=>y.id===x.question_id);return [p?.name,p?.college,p?.reg_id,q?.text,x.raw_answer,x.canonical,x.status,x.points??'']})]:[['Rank','Name','College','Participant ID','Q1','Q2','Q3','Q4','Q5','Q6','Q7','Total','Answered','Pending','Status'],...ps.map(p=>[p.rank,p.name,p.college,p.reg_id,...p.scores,p.total,p.answered,p.pending,p.status])];
+ const rows=req.params.type==='answers'?[['Name','College','PRO Number','Question','Answer','Canonical','Status','Score'],...ss.map(x=>{const p=ps.find(y=>y.id===x.player_id),q=qs.find(y=>y.id===x.question_id);return [p?.name,p?.college,p?.reg_id,q?.text,x.raw_answer,x.canonical,x.status,x.points??'']})]:[['Rank','Name','College','PRO Number','Q1','Q2','Q3','Q4','Q5','Q6','Q7','Total','Answered','Pending','Status'],...ps.map(p=>[p.rank,p.name,p.college,p.reg_id,...p.scores,p.total,p.answered,p.pending,p.status])];
  res.setHeader('Content-Type','text/csv; charset=utf-8');res.setHeader('Content-Disposition','attachment; filename="krillion-'+req.params.type+'-'+g.pin+'.csv"');res.send('\uFEFF'+rows.map(r=>r.map(safeCsv).join(',')).join('\r\n'));
 });
 app.put('/api/host/question/:id',host,(req,res)=>{
