@@ -21,6 +21,9 @@ CREATE TABLE IF NOT EXISTS players(id TEXT PRIMARY KEY, game_id TEXT NOT NULL RE
 CREATE TABLE IF NOT EXISTS submissions(game_id TEXT NOT NULL, player_id TEXT NOT NULL REFERENCES players(id), question_id INTEGER NOT NULL REFERENCES questions(id), raw_answer TEXT NOT NULL, canonical TEXT, points INTEGER, status TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(game_id,player_id,question_id));
 CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, game_id TEXT, actor TEXT, action TEXT, detail TEXT, occurred_at TEXT DEFAULT CURRENT_TIMESTAMP);
 `);
+// Existing PINs created by the earlier host-controlled version should stay usable.
+// Previously finished games remain closed; only in-progress legacy sessions migrate.
+db.prepare("UPDATE games SET status='open' WHERE status IN ('lobby','active','review')").run();
 if(db.prepare('SELECT count(*) c FROM questions').get().c===0){
  const seed=JSON.parse(fs.readFileSync(new URL('./questions.json',import.meta.url),'utf8'));
  const insert=db.prepare('INSERT INTO questions(position,type,text,bank) VALUES(?,?,?,?)');
