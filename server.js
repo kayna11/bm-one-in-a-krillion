@@ -98,9 +98,9 @@ app.post('/api/host/game/:pin/close',host,(req,res)=>{
 });
 app.post('/api/join',(req,res)=>{
  const g=gameByPin(String(req.body.pin||''));if(!g||g.status!=='open')return res.status(400).json({error:'Invalid or closed game PIN'});
- const name=String(req.body.name||'').trim().slice(0,80), college=String(req.body.college||'').trim().slice(0,120), reg=String(req.body.regId||'').trim().slice(0,60);
- if(!name||!college||!reg)return res.status(400).json({error:'Name, college and participant ID required'});
- if(db.prepare('SELECT id FROM players WHERE game_id=? AND reg_id=?').get(g.id,reg))return res.status(409).json({error:'Participant ID already registered. Use your original device to continue.'});
+ const name=String(req.body.name||'').trim().slice(0,80), college=String(req.body.college||'').trim().slice(0,120)||'—', reg=String(req.body.regId||'').trim().slice(0,60);
+ if(!name||!reg)return res.status(400).json({error:'Please enter your name and PRO number'});
+ if(db.prepare('SELECT id FROM players WHERE game_id=? AND reg_id=?').get(g.id,reg))return res.status(409).json({error:'PRO number already registered. Use your original device to continue.'});
  const id=uid(),t=token('player',id);
  db.prepare('INSERT INTO players(id,game_id,name,college,reg_id,token_hash) VALUES(?,?,?,?,?,?)').run(id,g.id,name,college,reg,mac(t));emitSelf(g);
  res.json({token:t,pin:g.pin,name});
