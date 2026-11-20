@@ -19,7 +19,7 @@ const norm=s=>String(s??'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toL
 const id=()=>crypto.randomUUID();
 function sign(payload){const content=Buffer.from(JSON.stringify(payload)).toString('base64url');const sig=crypto.createHmac('sha256',SECRET).update(content).digest('base64url');return content+'.'+sig}
 function verify(token){try{const [content,sig]=String(token||'').split('.');if(!content||!sig)return null;const actual=crypto.createHmac('sha256',SECRET).update(content).digest();const provided=Buffer.from(sig,'base64url');if(actual.length!==provided.length||!crypto.timingSafeEqual(actual,provided))return null;return JSON.parse(Buffer.from(content,'base64url').toString())}catch{return null}}
-function bearer(req){const authorization=(req.headers.authorization||'').replace(/^Bearer /i,'');const fromCookie=(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('krillion_host='));return verify(authorization||fromCookie?.slice('krillion_host='.length))}
+function bearer(req){const authorization=(req.headers.authorization||'').replace(/^Bearer /i,'');const fromCookie=(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('krillion_host='));return verify(authorization)||verify(fromCookie?.slice('krillion_host='.length))}
 function authHost(req){const t=bearer(req);return t?.role==='host'&&Date.now()<t.expires}
 function authPlayer(req){const t=bearer(req);return t?.role==='player'?db.players.find(p=>p.id===t.id&&p.tokenNonce===t.nonce):null}
 function response(res,status,payload){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(payload))}
