@@ -16,6 +16,17 @@ assert.equal((await http('/api/health')).data.version,2);
 const playerPage=await fetch(base+'/');assert.equal(playerPage.status,200);assert.ok((await playerPage.text()).includes('BEGIN DESCENDING'));
 assert.equal((await http('/host')).status,200);assert.equal((await http('/api/host/games')).status,401);
 assert.equal((await http('/api/host/login','POST',{password:'bad'})).status,401);
+const formRequest=async password=>fetch(base+'/host/login',{method:'POST',redirect:'manual',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({password})});
+const wrongForm=await formRequest('invalid');
+assert.equal(wrongForm.status,303);assert.equal(wrongForm.headers.get('location'),'/host?error=incorrect');
+const validForm=await formRequest('my-very-strong-host-password');
+assert.equal(validForm.status,303);assert.equal(validForm.headers.get('location'),'/host?login=success');
+const sessionCookie=validForm.headers.get('set-cookie').split(';')[0];
+const sessionResponse=await fetch(base+'/api/host/session',{headers:{Cookie:sessionCookie}});
+assert.equal((await sessionResponse.json()).authenticated,true);
+const cookieGames=await fetch(base+'/api/host/games',{headers:{Cookie:sessionCookie}});
+assert.equal(cookieGames.status,200);
+
 const host=(await http('/api/host/login','POST',{password:'my-very-strong-host-password'})).data.token;assert.ok(host);
 const g=(await http('/api/host/games','POST',{},host)).data;assert.match(g.pin,/^\d{6}$/);
 const guest=await http('/api/games/'+g.pin+'/join','POST',{name:'Test Player',pro:'PRO001'});assert.equal(guest.status,201);const token=guest.data.token;
