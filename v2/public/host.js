@@ -1,21 +1,172 @@
 (() => {
-'use strict';const $=id=>document.getElementById(id);let token=sessionStorage.getItem('krillion-v2-host'),pin='',data=null,filter='',busy=false;
-function error(m){$('error').textContent=String(m);$('error').classList.remove('hidden')}
-function clearError(){$('error').classList.add('hidden')}
-async function api(path,body){let response;try{response=await fetch(path,{method:body===undefined?'GET':'POST',headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},body:body===undefined?undefined:JSON.stringify(body)})}catch{throw Error('Cannot connect to server')}const value=await response.json().catch(()=>({}));if(!response.ok)throw Error(value.error||'Request failed');return value}
-function row(items){const tr=document.createElement('tr');items.forEach(item=>{const td=document.createElement('td');td.textContent=item===null?'—':String(item);tr.append(td)});return tr}
-function node(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e}
-function updateRoster(){if(!data)return;const body=$('players');body.replaceChildren();data.players.filter(p=>(p.name+' '+p.pro).toLowerCase().includes(filter)).forEach(p=>body.append(row([p.rank,p.name,p.pro,...p.scores,p.total,p.answered+'/7'+(p.pending?' · '+p.pending+' pending':'')]))}
-function render(){if(!data)return;$('gameArea').classList.remove('hidden');$('gameLabel').textContent='Game '+data.pin;$('gameStatus').textContent=data.status==='open'?'Open — contestants can play at their own pace':'Closed — results are preserved';$('currentPin').textContent=data.pin;$('playerLink').href=location.origin+'/?pin='+data.pin;const finished=data.players.filter(p=>p.completed).length,pending=data.answers.filter(a=>a.status==='pending');$('metrics').replaceChildren(...[[data.players.length,'PLAYERS'],[finished,'FINISHED'],[pending.length,'PENDING']].map(([v,label])=>{const d=node('div');d.append(node('strong','',v),node('span','',label));return d}));$('pendingCount').textContent=pending.length+' pending';$('closeGame').disabled=data.status!=='open';updateRoster();const pendingArea=$('reviews');pendingArea.replaceChildren();if(!pending.length)pendingArea.append(node('p','none','No unanswered reviews. The scorecard updates automatically.'));
-pending.forEach(a=>{const holder=node('div','review-row');const info=node('div');info.append(node('strong','',a.player+' — '+a.pro),node('small','','Q'+(a.questionIndex+1)+' · '+a.question),node('p','',a.answer));const controls=node('div','buttons'),select=document.createElement('select');[[0,'Reject: 0'],[10,'Plankton: 10'],[15,'Too Clever: 15'],[30,'Schooler: 30'],[60,'Rare: 60'],[85,'Deep Cut: 85'],[100,'Krillion: 100']].forEach(([v,label])=>{const opt=document.createElement('option');opt.value=v;opt.textContent=label;select.append(opt)});const button=node('button','', 'SAVE SCORE');button.addEventListener('click',()=>act(async()=>{await api('/api/host/games/'+pin+'/review',{answerId:a.id,points:Number(select.value)});await refresh()}));controls.append(select,button);holder.append(info,controls);pendingArea.append(holder)});
-const answers=$('answers');answers.replaceChildren();data.answers.forEach(a=>answers.append(row([a.player,a.pro,'Q'+(a.questionIndex+1),a.answer,a.status,a.points])))}
-async function refresh(){if(!pin)return;data=await api('/api/host/games/'+pin);render()}
-async function load(){const gs=await api('/api/host/games');$('loginPanel').classList.add('hidden');$('dashboard').classList.remove('hidden');$('gameSelect').replaceChildren();gs.forEach(g=>{const option=document.createElement('option');option.value=g.pin;option.textContent=g.pin+' ('+g.status+')';$('gameSelect').append(option)});if(gs.length){if(!gs.some(g=>g.pin===pin))pin=gs[0].pin;$('gameSelect').value=pin;await refresh()}else $('gameArea').classList.add('hidden')}
-async function act(fn){if(busy)return;busy=true;clearError();try{await fn()}catch(e){error(e.message)}finally{busy=false}}
-// Host login is intentionally a native form POST; login works without JavaScript.
-$('newGame').addEventListener('click',()=>act(async()=>{const g=await api('/api/host/games',{});pin=g.pin;await load()}));$('gameSelect').addEventListener('change',()=>act(async()=>{pin=$('gameSelect').value;await refresh()}));$('search').addEventListener('input',()=>{filter=$('search').value.toLowerCase();updateRoster()});
-$('copyLink').addEventListener('click',()=>navigator.clipboard.writeText(location.origin+'/?pin='+pin).then(()=>{clearError();$('copyLink').textContent='COPIED ✓';setTimeout(()=>$('copyLink').textContent='COPY PLAYER LINK',1600)}).catch(()=>error('Copy the player URL from the OPEN PLAYER PAGE link.')));
-function download(kind){if(!pin)return;fetch('/api/host/games/'+pin+'/export/'+kind,{headers:{Authorization:'Bearer '+token}}).then(async res=>{if(!res.ok)throw Error('CSV export failed');const blob=await res.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='krillion-'+kind+'-'+pin+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1200)}).catch(e=>error(e.message))}
-$('exportScores').addEventListener('click',()=>download('scores'));$('exportAnswers').addEventListener('click',()=>download('answers'));$('closeGame').addEventListener('click',()=>{if(confirm('Close this game? New submissions will stop.'))act(async()=>{await api('/api/host/games/'+pin+'/close',{});await refresh()})});
-api('/api/host/session').then(info=>{if(info.authenticated)return load();if(token)return load();}).catch(()=>{});setInterval(()=>{if(pin&&!busy)refresh().catch(()=>{})},7000);
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const state = {pin:'', games:[], game:null, busy:false, query:''};
+  const banner = $('error');
+
+  function message(value) {
+    banner.textContent = String(value);
+    banner.classList.remove('hidden');
+  }
+  function clear() {banner.classList.add('hidden');}
+  function node(tag, content, className) {
+    const e = document.createElement(tag);
+    if (className) e.className = className;
+    if (content !== undefined) e.textContent = String(content);
+    return e;
+  }
+  async function request(route, data) {
+    const response = await fetch(route, {
+      method:data === undefined ? 'GET' : 'POST',
+      credentials:'same-origin',
+      headers:{'Content-Type':'application/json'},
+      body:data === undefined ? undefined : JSON.stringify(data)
+    });
+    const value = await response.json().catch(() => ({}));
+    if (!response.ok) throw Error(value.error || 'Server request failed');
+    return value;
+  }
+  async function perform(fn) {
+    if(state.busy)return;
+    state.busy=true;clear();
+    try {await fn();} catch(error) {message(error.message);}
+    finally {state.busy=false;}
+  }
+  function tableRow(values) {
+    const tr = node('tr');
+    for(const v of values) tr.append(node('td',v === null || v === undefined ? '—' : v));
+    return tr;
+  }
+  function scoreboard() {
+    const body=$('players');
+    body.replaceChildren();
+    if(!state.game)return;
+    for(const p of state.game.players) {
+      if(!(p.name+' '+p.pro).toLowerCase().includes(state.query)) continue;
+      body.append(tableRow([p.rank,p.name,p.pro,...p.scores,p.total,p.answered+'/7'+(p.pending?' · '+p.pending+' pending':'')]));
+    }
+  }
+  async function refresh() {
+    if(!state.pin)return;
+    state.game=await request('/api/host/games/'+state.pin);
+    render();
+  }
+  function render() {
+    const g=state.game;
+    if(!g)return;
+    $('gameArea').classList.remove('hidden');
+    $('gameLabel').textContent='Game '+g.pin;
+    $('gameStatus').textContent=g.status==='open'?'Open — contestants can play independently':'Closed — results are saved';
+    $('currentPin').textContent=g.pin;
+    $('playerLink').href=location.origin+'/?pin='+g.pin;
+    $('closeGame').disabled=g.status!=='open';
+    const completed=g.players.filter(p=>p.completed).length;
+    const pending=g.answers.filter(a=>a.status==='pending');
+    const metrics=$('metrics');
+    metrics.replaceChildren();
+    for(const [count,label] of [[g.players.length,'PLAYERS'],[completed,'FINISHED'],[pending.length,'PENDING']]) {
+      const d=node('div');
+      d.append(node('strong',count),node('span',label));
+      metrics.append(d);
+    }
+    scoreboard();
+    $('pendingCount').textContent=pending.length+' pending';
+    const area=$('reviews');
+    area.replaceChildren();
+    if(!pending.length)area.append(node('p','No answers need reviewing.','none'));
+    for(const answer of pending) {
+      const box=node('div',undefined,'review-row');
+      const description=node('div');
+      description.append(
+        node('strong',answer.player+' — '+answer.pro),
+        node('small','Q'+(answer.questionIndex+1)+' · '+answer.question),
+        node('p',answer.answer)
+      );
+      const controls=node('div',undefined,'buttons');
+      const select=node('select');
+      for(const [score,label] of [[0,'Reject: 0'],[10,'Plankton: 10'],[15,'Too Clever: 15'],[30,'Schooler: 30'],[60,'Rare: 60'],[85,'Deep Cut: 85'],[100,'Krillion: 100']]) {
+        const option=node('option',label);
+        option.value=score;
+        select.append(option);
+      }
+      const save=node('button','SAVE SCORE');
+      save.type='button';
+      save.addEventListener('click',()=>perform(async()=>{
+        await request('/api/host/games/'+g.pin+'/review',{answerId:answer.id,points:Number(select.value)});
+        await refresh();
+      }));
+      controls.append(select,save);
+      box.append(description,controls);
+      area.append(box);
+    }
+    const tbody=$('answers');
+    tbody.replaceChildren();
+    for(const a of g.answers)tbody.append(tableRow([a.player,a.pro,'Q'+(a.questionIndex+1),a.answer,a.status,a.points]));
+  }
+  async function load() {
+    state.games=await request('/api/host/games');
+    $('loginPanel').classList.add('hidden');
+    $('dashboard').classList.remove('hidden');
+    const select=$('gameSelect');
+    select.replaceChildren();
+    for(const g of state.games) {
+      const option=node('option',g.pin+' ('+g.status+')');
+      option.value=g.pin;
+      select.append(option);
+    }
+    if(!state.games.length) {
+      $('gameArea').classList.add('hidden');
+      return;
+    }
+    if(!state.games.some(g=>g.pin===state.pin))state.pin=state.games[0].pin;
+    select.value=state.pin;
+    await refresh();
+  }
+  function download(kind) {
+    if(!state.pin)return;
+    perform(async()=>{
+      const response=await fetch('/api/host/games/'+state.pin+'/export/'+kind,{credentials:'same-origin'});
+      if(!response.ok)throw Error('Export failed');
+      const blob=await response.blob();
+      const url=URL.createObjectURL(blob);
+      const a=node('a');
+      a.href=url;
+      a.download='krillion-'+kind+'-'+state.pin+'.csv';
+      a.click();
+      setTimeout(()=>URL.revokeObjectURL(url),1000);
+    });
+  }
+  $('newGame').addEventListener('click',()=>perform(async()=>{
+    const created=await request('/api/host/games',{});
+    state.pin=created.pin;
+    await load();
+  }));
+  $('gameSelect').addEventListener('change',()=>perform(async()=>{
+    state.pin=$('gameSelect').value;
+    await refresh();
+  }));
+  $('search').addEventListener('input',()=>{
+    state.query=$('search').value.trim().toLowerCase();
+    scoreboard();
+  });
+  $('copyLink').addEventListener('click',()=>perform(async()=>{
+    await navigator.clipboard.writeText(location.origin+'/?pin='+state.pin);
+    $('copyLink').textContent='COPIED ✓';
+    setTimeout(()=>{$('copyLink').textContent='COPY PLAYER LINK';},1500);
+  }));
+  $('exportScores').addEventListener('click',()=>download('scores'));
+  $('exportAnswers').addEventListener('click',()=>download('answers'));
+  $('closeGame').addEventListener('click',()=>{
+    if(!confirm('Close this game? Players can no longer join or submit answers.'))return;
+    perform(async()=>{
+      await request('/api/host/games/'+state.pin+'/close',{});
+      await refresh();
+    });
+  });
+  request('/api/host/session').then(session=>{
+    if(session.authenticated)return load();
+    $('loginPanel').classList.remove('hidden');
+    $('dashboard').classList.add('hidden');
+  }).catch(error=>message('Host session check failed: '+error.message));
+  setInterval(()=>{if(state.pin&&!state.busy)refresh().catch(error=>message(error.message));},9000);
 })();
