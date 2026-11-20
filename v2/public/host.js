@@ -67,14 +67,26 @@
     $('closeGame').disabled=g.status!=='open';
     const completed=g.players.filter(p=>p.completed).length;
     const pending=g.answers.filter(a=>a.status==='pending');
+    const unlisted=g.answers.filter(a=>a.status==='unlisted');
     const metrics=$('metrics');
     metrics.replaceChildren();
-    for(const [count,label] of [[g.players.length,'PLAYERS'],[completed,'FINISHED'],[pending.length,'PENDING']]) {
+    for(const [count,label] of [[g.players.length,'PLAYERS'],[completed,'FINISHED'],[pending.length,'PENDING'],[unlisted.length,'UNLISTED']]) {
       const d=node('div');
       d.append(node('strong',count),node('span',label));
       metrics.append(d);
     }
     scoreboard();
+    $('unlistedCount').textContent=unlisted.length+' unlisted';
+    const unlistedArea=$('unlistedAnswers');
+    unlistedArea.replaceChildren();
+    if(!unlisted.length)unlistedArea.append(node('p','No unlisted answers yet.','none'));
+    for(const a of unlisted){
+      const line=node('div',undefined,'review-row');
+      const detail=node('div');
+      detail.append(node('strong',a.player+' · '+a.pro),node('small','Q'+(a.questionIndex+1)),node('p',a.answer));
+      line.append(detail,node('strong','0 POINTS'));
+      unlistedArea.append(line);
+    }
     $('pendingCount').textContent=pending.length+' pending';
     const area=$('reviews');
     area.replaceChildren();
