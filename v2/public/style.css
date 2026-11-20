@@ -83,3 +83,20 @@
 .admin-card th:nth-child(2),.admin-card td:nth-child(2){font-weight:700}
 .admin-card table td:nth-child(11){font-weight:800;color:#10547c}
 @media(max-width:640px){.game-nav a{font-size:7px}.admin-card .buttons{gap:8px}}
+
+
+/* Fixed-score host validation panel */
+.bank-setup{border:2px solid #60a2ca;background:linear-gradient(#fff,#f1f9ff)}
+.bank-setup .description-admin{font-size:13px;line-height:1.7;margin:16px 0 23px;color:#4c687b}
+.bank-setup label{font-size:12px;color:#315a71;font-weight:800;letter-spacing:.04em}
+.bank-edit-grid{display:grid;grid-template-columns:minmax(210px,1fr) minmax(250px,1.4fr);gap:25px}
+.bank-edit-grid select{width:100%;max-width:100%;background:#fff;font-size:12px;white-space:normal}
+.bank-setup textarea{display:block;width:100%;min-height:320px;background:#082540;color:#e7fbff;border:2px solid #417da3;border-radius:10px;padding:15px 16px;resize:vertical;font:13px/1.85 ui-monospace,SFMono-Regular,Consolas,monospace;outline:none}
+.bank-setup textarea:focus{border-color:#158fcd;box-shadow:0 0 0 3px #91daf45c}
+.bank-question-text{line-height:1.6;font-weight:800;font-size:16px;padding:15px;background:#e2f5fc;border-radius:9px}
+.bank-checklist{line-height:1.65;font-size:12px;color:#3d6e88}
+.bank-publish{display:flex;gap:20px;align-items:center;justify-content:space-between;border-top:1px solid #c8e0ee;margin-top:25px;padding-top:18px}
+.bank-publish p{margin:8px 0;max-width:490px}
+.bank-publish button{background:#13836f;padding:16px 19px}
+.bank-publish button:disabled{opacity:.45}
+@media(max-width:760px){.bank-edit-grid{grid-template-columns:1fr}.bank-publish{flex-direction:column;align-items:stretch}}
