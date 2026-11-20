@@ -30,3 +30,26 @@
 @keyframes headline-bob{to{transform:translateY(5px)}}
 @media (prefers-reduced-motion:reduce){.descent-overlay:before,.descent-headline,.descent-sub,.descent-light,.descent-bubbles,.sub-propeller{animation:none!important}.descent-sub{transform:none}}
 @media (max-width:480px){.descent-sub{margin:36px 0 55px;transform-origin:center}.skip-descent{margin-top:26px}}
+
+
+/* Each answer earns a clear Krillion-style scoring celebration. */
+.score-reveal{position:relative;overflow:hidden;background:radial-gradient(ellipse at 50% 20%,#15597f,#081936 78%);border-color:#a9e9f1;animation:score-arrive .4s ease-out both}
+.score-reveal:before,.score-reveal:after{content:'✦';position:absolute;font-size:21px;color:#fff0a0;opacity:.7;top:24%;animation:score-twinkle 1.2s ease-in-out infinite alternate}
+.score-reveal:before{left:9%}.score-reveal:after{right:9%;animation-delay:.5s}
+.score-answer-label,.score-earned-label{font:9px/2 'Press Start 2P';color:#94cde3;letter-spacing:.03em}
+.score-reveal h2{margin:8px auto 28px;max-width:95%;overflow-wrap:anywhere;color:#fff;font:clamp(14px,3.4vw,21px)/1.7 'Press Start 2P'}
+.score-earned-label{margin:15px 0 5px;color:#c8ecfa}
+.score-burst{display:flex;align-items:center;justify-content:center;gap:13px;margin:10px 0}
+.score-burst .points{font:clamp(23px,5.5vw,38px)/1.55 'Press Start 2P';color:#ffe69d;text-shadow:3px 4px 0 #865c39;animation:score-pop .48s cubic-bezier(.15,1.4,.52,1) both}
+.score-star{font-size:25px;color:#ffe0a1;animation:score-twinkle .75s ease-in-out infinite alternate}
+.score-star:last-child{animation-delay:.35s}
+.score-tier{display:inline-block;border:2px solid #8bdaf0;background:#0a345b;color:#a3f5e7;padding:12px 17px;font:10px/1.7 'Press Start 2P';margin:10px auto 8px}
+.score-total{border-top:1px solid #4b8da7;border-bottom:1px solid #4b8da7;padding:15px 3px;margin-top:22px;display:flex;justify-content:space-between;align-items:center;gap:12px;text-align:left}
+.score-total span{font:8px/1.7 'Press Start 2P';color:#b5d9ed}
+.score-total strong{font:clamp(9px,2.5vw,13px)/1.7 'Press Start 2P';color:#ffe49e;text-align:right}
+.score-pending .score-burst .points{color:#e0f4ff;text-shadow:none;animation:none;font-size:clamp(19px,4vw,28px)}
+.score-pending .score-tier{color:#fff1bf;border-color:#fff1bf}
+@keyframes score-arrive{from{opacity:.1;transform:translateY(15px)}to{opacity:1;transform:translateY(0)}}
+@keyframes score-pop{from{transform:scale(.45);opacity:.2}to{transform:scale(1);opacity:1}}
+@keyframes score-twinkle{to{transform:scale(1.35);opacity:1}}
+@media(prefers-reduced-motion:reduce){.score-reveal,.score-reveal:before,.score-reveal:after,.score-burst .points,.score-star{animation:none!important}}
