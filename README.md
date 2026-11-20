@@ -1,64 +1,49 @@
-# KRILLION — Best Manager Dive
+# KRILLION — Clean Rebuild (v2)
 
-A Krillion-inspired, **self-paced**, seven-question rarity game for a college Best Manager round.
+A self-paced seven-question game for Best Manager competitions. **This is a new application**, stored in `v2/` and launched by the root `npm start` command. The old version remains as unused source files for reference only.
 
-## How it works
+## How to play
 
-1. The organiser opens `/host`, signs in, and clicks **Generate new game PIN**.
-2. Players visit the website, enter the PIN, name, college and registration ID.
-3. **Each player advances through all seven questions at their own pace**. No host-driven timer, round controls or reveal button.
-4. Recognised answers immediately reveal the rarity tier and points (10, 15, 30, 60, 85 or 100), and the participant can continue instantly.
-5. Answers missing from the curated bank are saved as **Pending Review**, allowing the player to continue. Host review adjusts their scores automatically.
-6. After question seven, players receive a detailed seven-round scorecard and a leaderboard of completed players.
-7. The host can check scores, contestant progress and individual submissions at any time, and download CSV reports.
+1. Host opens `/host` and logs in with `HOST_PASSWORD`.
+2. Host clicks **Generate New Game PIN**.
+3. Host shares the resulting link or six-digit PIN.
+4. Each participant enters **Full Name** and **PRO Number** (no college field).
+5. Each participant answers all seven questions **at their own pace**. There is no timer, no host-led reveal, and no waiting for other participants.
+6. Recognised answers receive an immediate rarity-tier score.
+7. Answers outside the starter database are marked **Pending Review**; the player moves on, and the organiser can award points later.
+8. On completion, the participant sees their question-by-question scorecard. The organiser sees every participant's scores and submissions at any time, and can export CSV.
 
-## Visual style
+## How to deploy on Railway
 
-Original retro pixel-art ocean-dive theme, using the classic rare-answer diving concept as inspiration. No copied game art or proprietary assets.
+- GitHub source: `kayna11/bm-one-in-a-krillion`, branch `main`
+- Install/build: `npm install` (the new runtime has **zero external dependencies**)
+- Start command: `npm start`
+- Runtime: Node.js 20+
+- Required environment variables:
+  - `NODE_ENV=production`
+  - `HOST_PASSWORD` — a private strong organiser password
+  - `SESSION_SECRET` — a private random value of **32+ characters**
+  - `DATABASE_PATH=/data/krillion-v2.json` — only after attaching a Railway volume at `/data`
 
-## Deploying to Railway
+**Important:** The new game stores data as JSON, **not SQLite**. Never point `DATABASE_PATH` to an old `.sqlite` file. Without a persistent volume, game PINs and results may be lost on deployment.
 
-The project uses Node.js 20+, Express, Socket.IO and SQLite.
+## Pages
 
-Set the following Railway environment variables:
+- `/` – player registration and game.
+- `/host` – organiser PIN generator, participant scoreboard, review and exports.
+- `/api/health` – expected response: `{"ok":true,"version":2,"mode":"self-paced"}`.
 
-```
-NODE_ENV=production
-HOST_PASSWORD=(your private strong password)
-SESSION_SECRET=(random secret of at least 32 characters)
-DATABASE_PATH=/data/game.sqlite
-```
+## Tests
 
-Attach a **persistent Railway Volume** at `/data`. If a persistent disk is not mounted, scores may be lost when the service is rebuilt or redeployed.
+Run `npm test`. The test starts the **real Node server** and verifies host login, PIN creation, registration, seven consecutive answers, instant scoring, unfamiliar-answer review, CSV export, and state surviving a server restart.
 
-Build: `npm install`
-Start: `npm start`
+## Before the actual fest
 
-### Routes
-- `/` – mobile-first player game
-- `/host` – organiser dashboard (new PIN, all results, pending reviews, CSV exports)
-- `/screen?pin=123456` – optional passive results display
-- `/api/health` – health endpoint
+- Test using several real mobile devices and inspect the Railway logs.
+- Expand and verify the answer bank in `questions.json`. The included lists are **limited editorial examples**, not exhaustive verified databases or survey-measured rarity frequencies.
+- Keep the Railway volume backed up and keep organiser credentials private.
+- Unknown answers still need human review, which can change final rankings.
 
-## Important limitations before competition use
+## Why rebuild?
 
-- Answer banks in `questions.json` are **small curated seeds**, not exhaustive verified datasets or survey-based rarity measures. Expand and verify them before running a serious competition.
-- Unknown answers are **not automatically checked by an external AI**. They need human organiser review. Player scores remain provisional until the host completes reviews.
-- A registered player can continue on the original browser using their saved session; self-service recovery onto another device is not implemented.
-- The base game uses 7 main questions. Extra tie-breaker questions are stored in the dataset but not part of the self-paced player flow.
-- The host scoreboard shows every participant, including players who have not yet completed all seven questions. Ranking should be considered provisional while games are active.
-- The app should be load-tested with your expected number of contestants before the event.
-
-## Development
-
-```sh
-npm install
-npm test
-npm start
-```
-
-Example questions and starter rarity estimates may be edited in `questions.json` before the database is first created. After initial launch, existing question data lives in SQLite; changing the JSON file alone will not update a populated database.
-
-## Data privacy
-
-Only the password-protected host dashboard shows individual submissions, registration IDs and complete results exports. The optional presentation board and player leaderboard show publicly visible player names, colleges and totals of completed participants.
+The old application combined Express, Socket.IO, SQLite and several incremental gameplay patches. This replacement uses a single Node HTTP server and standalone player/host scripts with no third-party runtime packages, reducing deployment and browser startup dependencies.
