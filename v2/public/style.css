@@ -69,3 +69,17 @@
 .timer-danger .timer-topline strong{color:#fff}
 @keyframes timer-pulse{to{box-shadow:0 0 14px #ff6a8460}}
 @media(prefers-reduced-motion:reduce){.question-timer.timer-danger{animation:none}}
+
+
+/* Clear player/host navigation and organiser controls */
+.game-nav{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;margin:15px 0 5px}
+.game-nav a{display:inline-block;font:8px/1.7 'Press Start 2P';padding:11px 13px;text-decoration:none;border:2px solid #8bd8e8;background:#092e56;color:#e0f7ff}
+.game-nav a.nav-host{background:#ffe1a0;border-color:#fff1be;color:#172f54;box-shadow:3px 3px 0 #195579}
+.game-nav a:hover{filter:brightness(1.12)}
+.host-meta{font-size:12px;color:#628ba2;margin-top:9px}
+.admin-card .pin-big{border:2px dashed #6ab5d6;border-radius:10px;background:#eefaff;padding:12px 19px;width:max-content;max-width:100%;margin-top:12px}
+.admin-card .buttons button{white-space:nowrap}
+.admin-card th:first-child,.admin-card td:first-child{position:sticky;left:0;background:#edf6fa;z-index:1}
+.admin-card th:nth-child(2),.admin-card td:nth-child(2){font-weight:700}
+.admin-card table td:nth-child(11){font-weight:800;color:#10547c}
+@media(max-width:640px){.game-nav a{font-size:7px}.admin-card .buttons{gap:8px}}
