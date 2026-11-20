@@ -32,6 +32,25 @@ function sum(playerId){return playerAnswers(playerId).reduce((n,a)=>n+(a.points|
 function roster(game){const all=db.players.filter(p=>p.gameId===game.id).map(p=>{const answers=playerAnswers(p.id);const scores=QUESTIONS.map((_,i)=>answers.find(a=>a.questionIndex===i)?.points??null);return {id:p.id,name:p.name,pro:p.pro,answered:answers.length,pending:answers.filter(a=>a.status==='pending').length,scores,total:sum(p.id),completed:answers.length===7}});all.sort((a,b)=>b.total-a.total||a.name.localeCompare(b.name));let prev=null;all.forEach((p,i)=>{p.rank=prev&&prev.total===p.total?prev.rank:i+1;prev=p});return all}
 function playerState(player){const game=db.games.find(g=>g.id===player.gameId);const answers=playerAnswers(player.id);const next=answers.length;const completed=next===7;const rounds=QUESTIONS.map((q,i)=>{const a=answers.find(a=>a.questionIndex===i);return {number:i+1,question:q.question,answer:a?.answer??null,points:a?.points??null,status:a?.status??'unanswered',tier:a?.tier??null}});return {name:player.name,pro:player.pro,pin:game.pin,completed,answered:next,total:sum(player.id),pending:answers.filter(a=>a.status==='pending').length,question:completed?null:{number:next+1,text:QUESTIONS[next].question},timer:completed?null:{seconds:QUESTION_SECONDS,deadline:player.timerQuestion===next?player.timerDeadline??null:null,serverNow:Date.now()},rounds,leaderboard:completed?roster(game).filter(p=>p.completed).map(({name,rank,total,pending})=>({name,rank,total,pending})):[]}}
 function scoreAnswer(questionIndex,text){const n=norm(text);if(!n)return null;const record=QUESTIONS[questionIndex].answers.find(row=>[row[0],...row.slice(2).flat()].some(a=>norm(a)===n));return record?{points:record[1],tier:({10:'PLANKTON',15:'TOO CLEVER',30:'SCHOOLER',60:'RARE',85:'DEEP CUT',100:'ONE IN A KRILLION'})[record[1]],canonical:record[0]}:null}
+// When a previously unknown answer is added to the verified game bank,
+// re-score saved pending submissions without changing answers already reviewed by the host.
+let autoResolved=0;
+for(const entry of db.answers){
+  if(entry.status!=='pending')continue;
+  const known=scoreAnswer(entry.questionIndex,entry.answer);
+  if(!known)continue;
+  entry.points=known.points;
+  entry.tier=known.tier;
+  entry.canonical=known.canonical;
+  entry.status='accepted';
+  autoResolved++;
+}
+if(autoResolved){save();console.log('Resolved '+autoResolved+' previously pending answers from expanded bank');}
+function scoreFromPriorReview(gameId,questionIndex,text){
+ const canonical=norm(text);
+ const earlier=db.answers.find(a=>a.questionIndex===questionIndex&&a.status==='accepted'&&a.points!==null&&db.players.some(p=>p.id===a.playerId&&p.gameId===gameId)&&norm(a.answer)===canonical);
+ return earlier?{points:earlier.points,tier:earlier.tier,canonical:earlier.canonical||earlier.answer}:null;
+}
 function csv(s){const v=String(s??'');return '"'+(/^[=+\-@\t\r]/.test(v)?"'":'')+v.replaceAll('"','""')+'"'}
 const MIME={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8'};
 function staticFile(res,urlPath){const route=urlPath==='/'?'index.html':urlPath==='/host'?'host.html':urlPath.slice(1);const filename=path.resolve(ROOT,'public',route);if(!filename.startsWith(path.resolve(ROOT,'public')+path.sep))return err(res,403,'Forbidden');try{const content=fs.readFileSync(filename);res.writeHead(200,{'Content-Type':MIME[path.extname(filename)]||'application/octet-stream','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(content)}catch{return err(res,404,'Not found')}}
@@ -85,7 +104,7 @@ if(req.method==='POST'&&pathname==='/api/me/timeout'){
  const entry={id:id(),playerId:p.id,questionIndex:next,answer:'TIME UP',status:'timed_out',points:0,tier:'TIME UP',canonical:null};
  db.answers.push(entry);p.timerQuestion=null;p.timerDeadline=null;save();
  return response(res,200,{points:0,tier:'TIME UP',status:'timed_out',answer:'TIME UP',total:sum(p.id),next:next+1});
-}if(req.method==='POST'&&pathname==='/api/me/answer'){const game=db.games.find(g=>g.id===p.gameId);if(game.status!=='open')return err(res,400,'This game is closed');const next=playerAnswers(p.id).length;if(next>=7)return err(res,400,'All seven questions are already completed');if(p.timerQuestion!==next||!Number.isFinite(p.timerDeadline))return err(res,409,'Start the question timer first');if(Date.now()>=p.timerDeadline)return err(res,409,'Time is up');const b=await parseBody(req),answer=String(b.answer||'').trim().slice(0,150);if(!answer)return err(res,400,'Type an answer');const scoring=scoreAnswer(next,answer),entry={id:id(),playerId:p.id,questionIndex:next,answer,status:scoring?'accepted':'pending',points:scoring?.points??null,tier:scoring?.tier??null,canonical:scoring?.canonical??null};db.answers.push(entry);p.timerQuestion=null;p.timerDeadline=null;save();return response(res,200,{points:entry.points,tier:entry.tier,status:entry.status,answer,total:sum(p.id),next:next+1})}}
+}if(req.method==='POST'&&pathname==='/api/me/answer'){const game=db.games.find(g=>g.id===p.gameId);if(game.status!=='open')return err(res,400,'This game is closed');const next=playerAnswers(p.id).length;if(next>=7)return err(res,400,'All seven questions are already completed');if(p.timerQuestion!==next||!Number.isFinite(p.timerDeadline))return err(res,409,'Start the question timer first');if(Date.now()>=p.timerDeadline)return err(res,409,'Time is up');const b=await parseBody(req),answer=String(b.answer||'').trim().slice(0,150);if(!answer)return err(res,400,'Type an answer');const scoring=scoreAnswer(next,answer)||scoreFromPriorReview(p.gameId,next,answer),entry={id:id(),playerId:p.id,questionIndex:next,answer,status:scoring?'accepted':'pending',points:scoring?.points??null,tier:scoring?.tier??null,canonical:scoring?.canonical??null};db.answers.push(entry);p.timerQuestion=null;p.timerDeadline=null;save();return response(res,200,{points:entry.points,tier:entry.tier,status:entry.status,answer,total:sum(p.id),next:next+1})}}
 if(req.method==='GET'&&pathname==='/host'){
  const bad=new URL(req.url,'http://localhost').searchParams.get('error')==='incorrect';
  if(bad){const file=fs.readFileSync(path.join(ROOT,'public','host.html'),'utf8');res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'});return res.end(file.replace('</form>','</form><p style="color:#b71c46;font-weight:bold" role="alert">Incorrect password. Try again.</p>'))}
