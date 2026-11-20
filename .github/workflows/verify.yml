@@ -1,4 +1,4 @@
-name: Verify game build
+name: Verify clean Krillion game
 on:
   push:
     branches: [main]
@@ -11,9 +11,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - run: npm install
       - run: npm test
-      - run: node --check server.js
-      - run: node --check public/player.js
-      - run: node --check public/host.js
-      - run: node --check public/screen.js
+      - run: node --check v2/app.js
+      - run: node --check v2/public/player.js
+      - run: node --check v2/public/host.js
