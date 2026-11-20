@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 const ROOT=path.dirname(fileURLToPath(import.meta.url));
 const PORT=Number(process.env.PORT||3000);
+const QUESTION_SECONDS=Math.max(1,Math.min(300,Number(process.env.QUESTION_SECONDS)||30));
 const PASSWORD=process.env.HOST_PASSWORD||'local-host-password';
 const SECRET=process.env.SESSION_SECRET||'local-secret-only-for-development';
 const STORE=path.resolve(process.env.DATABASE_PATH||path.join(ROOT,'data','krillion.json'));
@@ -29,7 +30,7 @@ function gameByPin(pin){return db.games.find(g=>g.pin===String(pin))}
 function playerAnswers(playerId){return db.answers.filter(a=>a.playerId===playerId).sort((a,b)=>a.questionIndex-b.questionIndex)}
 function sum(playerId){return playerAnswers(playerId).reduce((n,a)=>n+(a.points||0),0)}
 function roster(game){const all=db.players.filter(p=>p.gameId===game.id).map(p=>{const answers=playerAnswers(p.id);const scores=QUESTIONS.map((_,i)=>answers.find(a=>a.questionIndex===i)?.points??null);return {id:p.id,name:p.name,pro:p.pro,answered:answers.length,pending:answers.filter(a=>a.status==='pending').length,scores,total:sum(p.id),completed:answers.length===7}});all.sort((a,b)=>b.total-a.total||a.name.localeCompare(b.name));let prev=null;all.forEach((p,i)=>{p.rank=prev&&prev.total===p.total?prev.rank:i+1;prev=p});return all}
-function playerState(player){const game=db.games.find(g=>g.id===player.gameId);const answers=playerAnswers(player.id);const next=answers.length;const completed=next===7;const rounds=QUESTIONS.map((q,i)=>{const a=answers.find(a=>a.questionIndex===i);return {number:i+1,question:q.question,answer:a?.answer??null,points:a?.points??null,status:a?.status??'unanswered',tier:a?.tier??null}});return {name:player.name,pro:player.pro,pin:game.pin,completed,answered:next,total:sum(player.id),pending:answers.filter(a=>a.status==='pending').length,question:completed?null:{number:next+1,text:QUESTIONS[next].question},rounds,leaderboard:completed?roster(game).filter(p=>p.completed).map(({name,rank,total,pending})=>({name,rank,total,pending})):[]}}
+function playerState(player){const game=db.games.find(g=>g.id===player.gameId);const answers=playerAnswers(player.id);const next=answers.length;const completed=next===7;const rounds=QUESTIONS.map((q,i)=>{const a=answers.find(a=>a.questionIndex===i);return {number:i+1,question:q.question,answer:a?.answer??null,points:a?.points??null,status:a?.status??'unanswered',tier:a?.tier??null}});return {name:player.name,pro:player.pro,pin:game.pin,completed,answered:next,total:sum(player.id),pending:answers.filter(a=>a.status==='pending').length,question:completed?null:{number:next+1,text:QUESTIONS[next].question},timer:completed?null:{seconds:QUESTION_SECONDS,deadline:player.timerQuestion===next?player.timerDeadline??null:null,serverNow:Date.now()},rounds,leaderboard:completed?roster(game).filter(p=>p.completed).map(({name,rank,total,pending})=>({name,rank,total,pending})):[]}}
 function scoreAnswer(questionIndex,text){const n=norm(text);if(!n)return null;const record=QUESTIONS[questionIndex].answers.find(row=>[row[0],...row.slice(2).flat()].some(a=>norm(a)===n));return record?{points:record[1],tier:({10:'PLANKTON',15:'TOO CLEVER',30:'SCHOOLER',60:'RARE',85:'DEEP CUT',100:'ONE IN A KRILLION'})[record[1]],canonical:record[0]}:null}
 function csv(s){const v=String(s??'');return '"'+(/^[=+\-@\t\r]/.test(v)?"'":'')+v.replaceAll('"','""')+'"'}
 const MIME={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8'};
@@ -61,7 +62,30 @@ m=pathname.match(/^\/api\/host\/games\/(\d{6})\/export\/(scores|answers)$/);
 if(req.method==='GET'&&m){const game=gameByPin(m[1]);if(!game)return err(res,404,'Game not found');const players=roster(game);const rows=m[2]==='scores'?[['Rank','Name','PRO Number','Q1','Q2','Q3','Q4','Q5','Q6','Q7','Total','Answered','Pending','Completed'],...players.map(p=>[p.rank,p.name,p.pro,...p.scores,p.total,p.answered,p.pending,p.completed])]:[['Name','PRO Number','Question','Answer','Status','Points'],...db.answers.filter(a=>players.some(p=>p.id===a.playerId)).map(a=>{const p=players.find(x=>x.id===a.playerId);return[p.name,p.pro,QUESTIONS[a.questionIndex].question,a.answer,a.status,a.points]})];res.writeHead(200,{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="krillion-'+m[2]+'-'+m[1]+'.csv"','Cache-Control':'no-store'});return res.end('\uFEFF'+rows.map(r=>r.map(csv).join(',')).join('\r\n'))}
 m=pathname.match(/^\/api\/games\/(\d{6})\/join$/);
 if(req.method==='POST'&&m){const game=gameByPin(m[1]);if(!game||game.status!=='open')return err(res,400,'Invalid or closed game PIN');const b=await parseBody(req),name=String(b.name||'').trim().slice(0,80),pro=String(b.pro||'').trim().slice(0,60);if(!name||!pro)return err(res,400,'Enter name and PRO number');if(db.players.some(p=>p.gameId===game.id&&norm(p.pro)===norm(pro)))return err(res,409,'PRO number already registered for this PIN');const player={id:id(),gameId:game.id,name,pro,tokenNonce:id()};db.players.push(player);save();return response(res,201,{token:sign({role:'player',id:player.id,nonce:player.tokenNonce}),pin:game.pin})}
-if(pathname.startsWith('/api/me')){const p=authPlayer(req);if(!p)return err(res,401,'Player session expired. Use your original browser or join a new PIN');if(req.method==='GET'&&pathname==='/api/me')return response(res,200,playerState(p));if(req.method==='POST'&&pathname==='/api/me/answer'){const game=db.games.find(g=>g.id===p.gameId);if(game.status!=='open')return err(res,400,'This game is closed');const next=playerAnswers(p.id).length;if(next>=7)return err(res,400,'All seven questions are already completed');const b=await parseBody(req),answer=String(b.answer||'').trim().slice(0,150);if(!answer)return err(res,400,'Type an answer');const scoring=scoreAnswer(next,answer),entry={id:id(),playerId:p.id,questionIndex:next,answer,status:scoring?'accepted':'pending',points:scoring?.points??null,tier:scoring?.tier??null,canonical:scoring?.canonical??null};db.answers.push(entry);save();return response(res,200,{points:entry.points,tier:entry.tier,status:entry.status,answer,total:sum(p.id),next:next+1})}}
+if(pathname.startsWith('/api/me')){const p=authPlayer(req);if(!p)return err(res,401,'Player session expired. Use your original browser or join a new PIN');if(req.method==='GET'&&pathname==='/api/me')return response(res,200,playerState(p));
+if(req.method==='POST'&&pathname==='/api/me/start'){
+ const game=db.games.find(g=>g.id===p.gameId);
+ if(game.status!=='open')return err(res,400,'This game is closed');
+ const next=playerAnswers(p.id).length;
+ if(next>=7)return err(res,400,'All seven questions are completed');
+ if(p.timerQuestion!==next||!Number.isFinite(p.timerDeadline)){
+   p.timerQuestion=next;
+   p.timerDeadline=Date.now()+QUESTION_SECONDS*1000;
+   save();
+ }
+ return response(res,200,{questionIndex:next,deadline:p.timerDeadline,seconds:QUESTION_SECONDS,serverNow:Date.now()});
+}
+if(req.method==='POST'&&pathname==='/api/me/timeout'){
+ const game=db.games.find(g=>g.id===p.gameId);
+ if(game.status!=='open')return err(res,400,'This game is closed');
+ const next=playerAnswers(p.id).length;
+ if(next>=7)return err(res,400,'All seven questions are completed');
+ if(p.timerQuestion!==next||!Number.isFinite(p.timerDeadline))return err(res,409,'Question timer has not started');
+ if(Date.now()<p.timerDeadline)return err(res,409,'Question time has not expired');
+ const entry={id:id(),playerId:p.id,questionIndex:next,answer:'TIME UP',status:'timed_out',points:0,tier:'TIME UP',canonical:null};
+ db.answers.push(entry);p.timerQuestion=null;p.timerDeadline=null;save();
+ return response(res,200,{points:0,tier:'TIME UP',status:'timed_out',answer:'TIME UP',total:sum(p.id),next:next+1});
+}if(req.method==='POST'&&pathname==='/api/me/answer'){const game=db.games.find(g=>g.id===p.gameId);if(game.status!=='open')return err(res,400,'This game is closed');const next=playerAnswers(p.id).length;if(next>=7)return err(res,400,'All seven questions are already completed');if(p.timerQuestion!==next||!Number.isFinite(p.timerDeadline))return err(res,409,'Start the question timer first');if(Date.now()>=p.timerDeadline)return err(res,409,'Time is up');const b=await parseBody(req),answer=String(b.answer||'').trim().slice(0,150);if(!answer)return err(res,400,'Type an answer');const scoring=scoreAnswer(next,answer),entry={id:id(),playerId:p.id,questionIndex:next,answer,status:scoring?'accepted':'pending',points:scoring?.points??null,tier:scoring?.tier??null,canonical:scoring?.canonical??null};db.answers.push(entry);p.timerQuestion=null;p.timerDeadline=null;save();return response(res,200,{points:entry.points,tier:entry.tier,status:entry.status,answer,total:sum(p.id),next:next+1})}}
 if(req.method==='GET'&&pathname==='/host'){
  const bad=new URL(req.url,'http://localhost').searchParams.get('error')==='incorrect';
  if(bad){const file=fs.readFileSync(path.join(ROOT,'public','host.html'),'utf8');res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'});return res.end(file.replace('</form>','</form><p style="color:#b71c46;font-weight:bold" role="alert">Incorrect password. Try again.</p>'))}
